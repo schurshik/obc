@@ -6,6 +6,7 @@ open Core.Std
 open Core_extended.Std
 open Core_extended.Readline (* readline *)
 open Obclexer
+open Libevent
 
 type qfloat_num = QFloatNum of Obctypes.qfloat (* Zarith *)
 
@@ -564,6 +565,26 @@ let main () =
                 end
          end in
     try
+      let evt_base = Libevent.init() in
+      let evt = Libevent.create() in
+      let evt_callback fd fl =
+        if fl = TIMEOUT then
+          Libevent.del evt
+        else
+          (* let in_buf = Lexing.from_string ((input_line (Unix.in_channel_of_descr fd)) ^ "\n") in *)
+          let in_buf = Lexing.from_string ((read_line ()) ^ "\n") in
+          try
+            let prog = Obcparser.program Obclexer.read_tokens in_buf in
+            interprete_program prog g_vars_ref g_funs_ref;
+            Libevent.del evt;
+            exit 0
+          with
+          | Obclexer.SyntaxError err -> Printf.eprintf "%s" err
+          | Obcparser.Error -> Printf.eprintf "At offset %d: syntax error.\n" (Lexing.lexeme_start in_buf)
+      in
+      Libevent.set evt_base evt Unix.stdin [TIMEOUT; READ] false evt_callback;
+      Libevent.add evt (Some 0.1); (* timeout (for calling via pipeline) *)
+      Libevent.dispatch(evt_base);
       process_input ""
     with
     | QuitProgram -> ()

@@ -5,7 +5,7 @@
 all: obc.native
 
 obc.native: obc.ml obctypes.ml obcparser.mly
-	ocamlbuild -use-menhir -tag thread -use-ocamlfind -quiet -pkg core -pkg str -pkg zarith -pkg core_extended $@
+	ocamlbuild -use-menhir -tag thread -use-ocamlfind -quiet -pkg core -pkg str -pkg zarith -pkg core_extended -pkg libevent $@
 
 .PHONY: clean install uninstall
 
