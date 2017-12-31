@@ -37,9 +37,12 @@ type rel_op =
   | Lt
   | Gt
 
-type named_expression =
+type square_braces_with_expr =
+  | SquareBracesWithExpr of expression list
+and
+named_expression =
   | Value of string
-  | ValueAtIndex of (string * expression)
+  | ValueAtIndex of (string * expression list)
   | Scale
   | Ibase
   | Obase
@@ -64,7 +67,7 @@ expression =
 and
 argument_value =
   | ArgExpr of expression
-  | ArgArr of string
+  | ArgArr of (string * int)
 and
 opt_argument_list =
   | OptArguments of argument_value list
@@ -78,10 +81,13 @@ type argument_list =
 
 type letter_name =
   | Var of string
-  | Arr of string
+  | Arr of (string * int)
 
 type define_list =
   | Define of letter_name list
+
+type square_braces =
+  | SquareBraces of int
 
 type opt_auto_define_list =
   | AutoDefine of letter_name list

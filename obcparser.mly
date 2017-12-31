@@ -144,17 +144,21 @@ opt_auto_define_list:
 | AUTO d = define_list NEWLINE { match d with | Define v -> AutoDefine v }
 | AUTO d = define_list SEMICOLON { match d with | Define v -> AutoDefine v }
 
+square_braces:
+| LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { SquareBraces 1 }
+| s = square_braces LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { match s with | SquareBraces n -> SquareBraces (n + 1) }
+
 define_list:
 | l = LETTER { Define [Var l] }
-| l = LETTER LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { Define [Arr l] }
+| l = LETTER s = square_braces { match s with | SquareBraces n -> Define [Arr (l, n)] }
 | d = define_list COMMA l = LETTER { match d with | Define v -> Define (v @ [Var l]) }
-| d = define_list COMMA l = LETTER LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { match d with | Define v -> Define (v @ [Arr l]) }
+| d = define_list COMMA l = LETTER s = square_braces { match d with | Define v -> match s with | SquareBraces n -> Define (v @ [Arr (l, n)]) }
 
 argument_list:
 | e = expression { Arguments [ArgExpr e] }
-| l = LETTER LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { Arguments [ArgArr l] }
+| l = LETTER s = square_braces { match s with | SquareBraces n -> Arguments [ArgArr (l, n)] }
 | a = argument_list COMMA e = expression { match a with | Arguments v -> Arguments (v @ [ArgExpr e]) }
-| a = argument_list COMMA l = LETTER LEFT_SQUARE_BRACE RIGHT_SQUARE_BRACE { match a with | Arguments v -> Arguments (v @ [ArgArr l]) }
+| a = argument_list COMMA l = LETTER s = square_braces { match a with | Arguments v -> match s with | SquareBraces n -> Arguments (v @ [ArgArr (l, n)]) }
 
 return_expression:
 | /* empty */ { Empty }
@@ -185,10 +189,14 @@ expression:
 
 named_expression:
 | l = LETTER { Value l }
-| l = LETTER LEFT_SQUARE_BRACE e = expression RIGHT_SQUARE_BRACE { ValueAtIndex (l, e) }
+| l = LETTER s = square_braces_with_expr { match s with | SquareBracesWithExpr exprs -> ValueAtIndex (l, exprs) }
 | SCALE { Scale }
 | IBASE { Ibase }
 | OBASE { Obase }
+
+square_braces_with_expr:
+| LEFT_SQUARE_BRACE e = expression RIGHT_SQUARE_BRACE { SquareBracesWithExpr [e] }
+| s = square_braces_with_expr LEFT_SQUARE_BRACE e = expression RIGHT_SQUARE_BRACE { match s with | SquareBracesWithExpr l -> SquareBracesWithExpr (l @ [e]) }
 
 %inline rel_op:
 | EQ { Eq }

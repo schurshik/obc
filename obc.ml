@@ -45,17 +45,25 @@ let interprete_program prog g_vars_ref g_funs_ref =
     | Some f -> f
     | None -> make_qval "0" 0
   in
+  let create_arr_regexp arr_name arr_dim =
+    Str.regexp (Printf.sprintf "^%s%s:[0-9]+$" arr_name (String.concat ~sep:"" (List.init arr_dim ~f:(fun _ -> "\\[\\([0-9]+\\)\\]")))) in
   let add_to_vars_by_ref vars_ref p =
     if not (phys_equal vars_ref g_vars_ref) then
       let (k, _) = p in
       match rcv_from_hash !vars_ref k with
       | Some f -> add_to_hash vars_ref p
       | None ->
-         let reg_exp = Str.regexp (Printf.sprintf "^%s\\[[0-9]+\\]$" k) in
-         if List.exists ~f:(fun x -> Str.string_match reg_exp x 0) (Hashtbl.keys !vars_ref) then
-           add_to_hash vars_ref p
-         else
-           add_to_g_vars p
+         begin
+           match String.split k ~on:':' with
+           | [v; d] -> let arr_name = Str.replace_first (Str.regexp "^\\([^[]+\\)\\[.*$") "\\1" v in
+                       let arr_dim = Int.of_string d in
+                       let reg_exp = create_arr_regexp arr_name arr_dim in
+                       if List.exists ~f:(fun x -> Str.string_match reg_exp x 0) (Hashtbl.keys !vars_ref) then
+                           add_to_hash vars_ref p
+                       else
+                         add_to_g_vars p
+           | _ -> add_to_g_vars p
+         end
     else
       add_to_g_vars p
   in
@@ -63,21 +71,28 @@ let interprete_program prog g_vars_ref g_funs_ref =
     match rcv_from_hash vars k with
     | Some f -> f
     | None ->
-       let reg_exp = Str.regexp (Printf.sprintf "^%s\\[[0-9]+\\]$" k) in
-       if List.exists ~f:(fun x -> Str.string_match reg_exp x 0) (Hashtbl.keys vars) then
-         make_qval "0" 0
-       else
-         rcv_from_g_vars k
+       begin
+         match String.split k ~on:':' with
+         | [v; d] -> let arr_name = Str.replace_first (Str.regexp "^\\([^[]+\\)\\[.*$") "\\1" v in
+                     let arr_dim = Int.of_string d in
+                     let reg_exp = create_arr_regexp arr_name arr_dim in
+                     if List.exists ~f:(fun x -> Str.string_match reg_exp x 0) (Hashtbl.keys vars) then
+                       make_qval "0" 0
+                     else
+                       rcv_from_g_vars k
+         | _ -> rcv_from_g_vars k
+       end
   in
   let rcv_from_g_funs k =
     match rcv_from_hash !g_funs_ref k with
     | Some f -> f
     | None -> raise (IncorrectCall (Printf.sprintf "Function %s is not defined" k))
   in
-  let rcv_expr_name ?(str_ind="") named_expr =
+  let rcv_expr_name ?(str_inds=[]) named_expr =
     match named_expr with
     | Obctypes.Value l -> l
-    | Obctypes.ValueAtIndex (l, _) -> Printf.sprintf "%s[%s]" l str_ind
+    | Obctypes.ValueAtIndex (l, _) -> let inds_str = List.map ~f:(fun s -> Printf.sprintf "[%s]" s) str_inds |> String.concat ~sep:"" in
+                                      Printf.sprintf "%s%s:%d" l inds_str (List.length str_inds)
     | Obctypes.Scale -> "scale" (* Obclexer.scale_token *)
     | Obctypes.Ibase -> "ibase" (* Obclexer.ibase_token *)
     | Obctypes.Obase -> "obase" (* Obclexer.obase_token *)
@@ -144,12 +159,13 @@ let interprete_program prog g_vars_ref g_funs_ref =
                   let rec interprete_named_expression l_vars_ref named_expr =
                     let expr_name =
                       match named_expr with
-                      | Obctypes.ValueAtIndex (l, e) ->
-                         let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                         let val_to_int_string q =
-                           Printf.sprintf "%s" (Z.to_string (trunc_q_to_z q))
-                         in
-                         rcv_expr_name ~str_ind:(val_to_int_string (fst n)) named_expr
+                      | Obctypes.ValueAtIndex (l, exprs) ->
+                         let str_inds = List.map ~f:(fun e ->
+                                                     let val_to_int_string q =
+                                                       Printf.sprintf "%s" (Z.to_string (trunc_q_to_z q))
+                                                     in
+                                                     val_to_int_string (fst (qval_of_qfloat_num (interprete_expression l_vars_ref e)))) exprs in
+                         rcv_expr_name ~str_inds:str_inds named_expr
                       | _ -> rcv_expr_name named_expr
                     in
                     (expr_name, rcv_from_vars !l_vars_ref expr_name)
@@ -181,12 +197,22 @@ let interprete_program prog g_vars_ref g_funs_ref =
                                    | (Obctypes.Var s, Obctypes.ArgExpr e) ->
                                       let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
                                       add_to_hash (ref l_vars) (s, n)
-                                   | (Obctypes.Arr dst_r, Obctypes.ArgArr src_r) ->
-                                      let reg_exp = Str.regexp (Printf.sprintf "^%s\\[\\([0-9]+\\)\\]$" src_r) in
-                                      Hashtbl.iter ~f:(fun ~key:k ~data:d ->
-                                                       if Str.string_match reg_exp k 0 then
-                                                         let ind = Int.of_string (Str.replace_first reg_exp "\\1" k) in
-                                                         add_to_hash (ref l_vars) ((Printf.sprintf "%s[%d]" dst_r ind), d)) !g_vars_ref
+                                   | (Obctypes.Arr (dst_r, dst_d), Obctypes.ArgArr (src_r, src_d)) ->
+                                      if dst_d <> src_d
+                                      then
+                                        raise (IncorrectCall (Printf.sprintf "Array dimension mismatch in function %s" f))
+                                      else
+                                        let reg_exp = create_arr_regexp src_r src_d in
+                                        if List.exists ~f:(fun k -> Str.string_match reg_exp k 0) (Hashtbl.keys !l_vars_ref) then
+                                          Hashtbl.iter ~f:(fun ~key:k ~data:d ->
+                                                           if Str.string_match reg_exp k 0 then
+                                                             let inds = List.map ~f:(fun y -> Int.of_string (Str.replace_first reg_exp ("\\" ^ y) k))
+                                                                                 (List.init src_d ~f:(fun x -> Int.to_string (x + 1))) in
+                                                             let inds_str = String.concat ~sep:"" (List.map ~f:(fun x -> Printf.sprintf "[%d]" x) inds) in
+                                                             add_to_hash (ref l_vars) ((Printf.sprintf "%s%s:%d" dst_r inds_str dst_d), d)) !l_vars_ref
+                                        else
+                                            let inds_str = String.concat ~sep:"" (List.init dst_d ~f:(fun _ -> "[0]")) in
+                                            add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" dst_r inds_str dst_d, make_qval "0" 0)
                                    | (_, _) -> raise (IncorrectCall (Printf.sprintf "Parameter type mismatch in function %s" f))
                                  in
                                  List.iter ~f:add_to_l_vars l
@@ -198,7 +224,8 @@ let interprete_program prog g_vars_ref g_funs_ref =
                               let add_to_l_vars p =
                                 match p with
                                 | (Obctypes.Var s, n) -> add_to_hash (ref l_vars) (s, n)
-                                | (Obctypes.Arr s, n) -> add_to_hash (ref l_vars) (Printf.sprintf "%s[%d]" s 0, n)
+                                | (Obctypes.Arr (s, dim), n) -> let inds_str = String.concat ~sep:"" (List.init dim ~f:(fun _ -> "[0]")) in
+                                                                add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" s inds_str dim, n)
                               in
                               List.iter ~f:(fun s -> add_to_l_vars (s, (make_qval "0" 0))) l;
                          end;
