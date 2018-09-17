@@ -20,7 +20,7 @@ exception ReturnFromFunction of qfloat_num
 let create_hash () =
   Hashtbl.create ~hashable:String.hashable ()
 
-let interprete_program prog g_vars_ref g_funs_ref =
+let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
   let add_to_hash ?(if_exists_add=true) h_ref p =
     if not if_exists_add then
       match Hashtbl.find !h_ref (fst p) with
@@ -43,7 +43,12 @@ let interprete_program prog g_vars_ref g_funs_ref =
   let rcv_from_g_vars k =
     match rcv_from_hash !g_vars_ref k with
     | Some f -> f
-    | None -> make_qval "0" 0
+    | None ->
+       begin
+         if warn then
+           Printf.printf "The variable '%s' is not initialized\n" k;
+         make_qval "0" 0
+       end
   in
   let create_arr_regexp arr_name arr_dim =
     Str.regexp (Printf.sprintf "^%s%s:[0-9]+$" arr_name (String.concat ~sep:"" (List.init arr_dim ~f:(fun _ -> "\\[\\([0-9]+\\)\\]")))) in
@@ -54,6 +59,8 @@ let interprete_program prog g_vars_ref g_funs_ref =
       | Some f -> add_to_hash vars_ref p
       | None ->
          begin
+           if warn then
+             Printf.printf "The variable '%s' is not initialized\n" k;
            match String.split k ~on:':' with
            | [v; d] -> let arr_name = Str.replace_first (Str.regexp "^\\([^[]+\\)\\[.*$") "\\1" v in
                        let arr_dim = Int.of_string d in
@@ -77,7 +84,11 @@ let interprete_program prog g_vars_ref g_funs_ref =
                      let arr_dim = Int.of_string d in
                      let reg_exp = create_arr_regexp arr_name arr_dim in
                      if List.exists ~f:(fun x -> Str.string_match reg_exp x 0) (Hashtbl.keys vars) then
-                       make_qval "0" 0
+                       begin
+                         if warn then
+                           Printf.printf "The variable '%s' is not initialized\n" k;
+                         make_qval "0" 0
+                       end
                      else
                        rcv_from_g_vars k
          | _ -> rcv_from_g_vars k
@@ -156,7 +167,7 @@ let interprete_program prog g_vars_ref g_funs_ref =
             begin
               let rec interprete_statement ?(l_vars_ref=g_vars_ref) st =
                 let rec interprete_expression ?(to_print=false) l_vars_ref expr =
-                  let rec interprete_named_expression l_vars_ref named_expr =
+                  let rec interprete_named_expression ?(extract_val=true) l_vars_ref named_expr =
                     let expr_name =
                       match named_expr with
                       | Obctypes.ValueAtIndex (l, exprs) ->
@@ -168,7 +179,7 @@ let interprete_program prog g_vars_ref g_funs_ref =
                          rcv_expr_name ~str_inds:str_inds named_expr
                       | _ -> rcv_expr_name named_expr
                     in
-                    (expr_name, rcv_from_vars !l_vars_ref expr_name)
+                    (expr_name, if extract_val then rcv_from_vars !l_vars_ref expr_name else make_qval "0" 0)
                   in
                   match expr with
                   | Obctypes.NamedExpr v ->
@@ -211,6 +222,8 @@ let interprete_program prog g_vars_ref g_funs_ref =
                                                              let inds_str = String.concat ~sep:"" (List.map ~f:(fun x -> Printf.sprintf "[%d]" x) inds) in
                                                              add_to_hash (ref l_vars) ((Printf.sprintf "%s%s:%d" dst_r inds_str dst_d), d)) !l_vars_ref
                                         else
+                                            if warn then
+                                              Printf.printf "The array '%s%s' is not initialized\n" src_r (String.concat ~sep:"" (List.init src_d ~f:(fun _ -> "[]")));
                                             let inds_str = String.concat ~sep:"" (List.init dst_d ~f:(fun _ -> "[0]")) in
                                             add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" dst_r inds_str dst_d, make_qval "0" 0)
                                    | (_, _) -> raise (IncorrectCall (Printf.sprintf "Parameter type mismatch in function %s" f))
@@ -349,7 +362,8 @@ let interprete_program prog g_vars_ref g_funs_ref =
                   | Obctypes.Assign (o, v, e) ->
                      begin
                        let expr_val = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                       let (var_name, var_val) = interprete_named_expression l_vars_ref v in
+                       let (var_name, var_val) = interprete_named_expression ~extract_val:(match o with | Obctypes.OpAssign -> false | _ -> true) l_vars_ref v
+                       in
                        let lambda_op =
                          match o with
                          | Obctypes.OpAssign -> fun _ y -> y
@@ -488,6 +502,7 @@ let interprete_program prog g_vars_ref g_funs_ref =
 
 let main () =
   let force_interactive_mode = ref false in
+  let enable_warnings = ref false in
   let print_version = ref false in
   let in_file_list = ref [] in
   let usage = ref "" (* initialized later *) in
@@ -495,6 +510,7 @@ let main () =
   let parse_args args =
     let specs = [("-h|-help|--help", Arg.Unit (fun () -> raise (Arg.Help !usage)), "show help info and exit");
                  ("-i|-interactive|--interactive", Arg.Unit (fun () -> force_interactive_mode := true), "force interactive mode");
+                 ("-w|-warnings|--warnings", Arg.Unit (fun () -> enable_warnings := true), "enable warnings");
                  ("-v|-version|--version", Arg.Unit (fun () -> print_version := true), "print version and exit")] in
     let real_specs = (List.fold_left ~init:[] ~f:(fun a b -> let (l, s, d) = b in a @ (List.map ~f:(fun x -> (x, s, d)) l))
                                      (List.map ~f:(fun s -> let (k, s, d) = s in (Str.split (Str.regexp "|") k), s, d) specs)) in
@@ -547,7 +563,7 @@ let main () =
             try
               Printf.printf "in_file: %s\n" in_file;
               let prog = Obcparser.program Obclexer.read_tokens in_fbuf in
-              interprete_program prog g_vars_ref g_funs_ref
+              interprete_program ~warn:!enable_warnings prog g_vars_ref g_funs_ref
             with
             | Obclexer.SyntaxError err -> Printf.eprintf "%s" err
             | Obcparser.Error -> Printf.eprintf "At offset %d: syntax error.\n" (Lexing.lexeme_start in_fbuf)
@@ -578,7 +594,7 @@ let main () =
            let in_buf = Lexing.from_string line in
            try
              let prog = Obcparser.program Obclexer.read_tokens in_buf in
-             interprete_program prog g_vars_ref g_funs_ref;
+             interprete_program ~warn:!enable_warnings prog g_vars_ref g_funs_ref;
              process_input ""
            with
            | Obclexer.SyntaxError err -> Printf.eprintf "%s" err
@@ -602,7 +618,7 @@ let main () =
           let in_buf = Lexing.from_string ((read_line ()) ^ "\n") in
           try
             let prog = Obcparser.program Obclexer.read_tokens in_buf in
-            interprete_program prog g_vars_ref g_funs_ref;
+            interprete_program ~warn:!enable_warnings prog g_vars_ref g_funs_ref;
             Libevent.del evt;
             exit 0
           with
