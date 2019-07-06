@@ -5,6 +5,7 @@
 {
 open Lexing
 open Obcparser
+open Obctypes
 exception SyntaxError of string
 
 let raise_lex_error lexbuf =
@@ -17,8 +18,17 @@ let goto_next_line lexbuf =
     { p with pos_bol = lexbuf.lex_curr_pos;
              pos_lnum = p.pos_lnum + 1 }
 
-let make_qval str scl =
-  (Q.of_string str, scl)
+let make_qval ?(def=true) str scl =
+  { isdefined = def; rational = Q.of_string str; scale = scl; }
+
+let make_undef_qval () =
+  make_qval ~def:false "0" 0
+
+let isdefined_of_qval qval = qval.isdefined
+
+let rational_of_qval qval = qval.rational
+
+let scale_of_qval qval = qval.scale
 
 let ibase_ref = ref 10
 
@@ -107,6 +117,7 @@ rule read_tokens = parse
 | "else" { ELSE }
 | "while" { WHILE }
 | "sqrt" { SQRT }
+| "undef" { UNDEF }
 | scale_token { SCALE }
 | truncate_token { TRUNCATE }
 | ibase_token { IBASE }

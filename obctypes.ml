@@ -2,7 +2,7 @@
 (* obctypes.ml *)
 (* Developer: Branitskiy Alexander <schurshik@yahoo.com> *)
 
-type qfloat = Q.t * int (* rational and scale *)
+type qfloat = { isdefined: bool; rational: Q.t; scale: int; } (* isdefined, rational, scale *)
 
 type assign_op =
   | OpAssign
@@ -50,6 +50,7 @@ and
 expression =
   | NamedExpr of named_expression
   | Number of qfloat
+  | Undef
   | Call of (string * opt_argument_list)
   | LogApply of (log_op * expression * expression)
   | InvertBool of expression

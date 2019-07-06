@@ -46,6 +46,8 @@ open Obctypes
 
 %token SQRT
 
+%token UNDEF
+
 %token SCALE
 
 %token TRUNCATE
@@ -171,6 +173,7 @@ opt_argument_list:
 expression:
 | v = named_expression { NamedExpr v }
 | n = NUMBER { Number n }
+| UNDEF { Undef }
 | LEFT_CIRCLE_BRACE e = expression RIGHT_CIRCLE_BRACE { e }
 | f = LETTER LEFT_CIRCLE_BRACE a = opt_argument_list RIGHT_CIRCLE_BRACE { Call (f, a) }
 | e1 = expression o = log_op e2 = expression { LogApply (o, e1, e2) }

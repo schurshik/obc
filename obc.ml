@@ -31,7 +31,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
   in
   let add_to_g_vars ?(if_exists_add=true) p =
     if if_exists_add && (fst p) = "ibase" then
-      ibase_ref := Q.to_int (fst (snd p));
+      ibase_ref := Q.to_int (rational_of_qval (snd p));
     add_to_hash ~if_exists_add:if_exists_add g_vars_ref p
   in
   let add_to_g_funs ?(if_exists_add=true) p =
@@ -42,12 +42,17 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
   in
   let rcv_from_g_vars k =
     match rcv_from_hash !g_vars_ref k with
-    | Some f -> f
+    | Some f ->
+       begin
+         if warn && not (isdefined_of_qval f) then
+           Printf.printf "The variable '%s' is not initialized\n" k;
+         f
+       end
     | None ->
        begin
          if warn then
            Printf.printf "The variable '%s' is not initialized\n" k;
-         make_qval "0" 0
+         make_undef_qval ()
        end
   in
   let create_arr_regexp arr_name arr_dim =
@@ -56,11 +61,14 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
     if not (phys_equal vars_ref g_vars_ref) then
       let (k, _) = p in
       match rcv_from_hash !vars_ref k with
-      | Some f -> add_to_hash vars_ref p
+      | Some f ->
+         (* if warn && not (isdefined_of_qval f) then *)
+         (*   Printf.printf "The variable '%s' is not initialized\n" k; *)
+         add_to_hash vars_ref p
       | None ->
          begin
-           if warn then
-             Printf.printf "The variable '%s' is not initialized\n" k;
+           (* if warn then *)
+           (*   Printf.printf "The variable '%s' is not initialized\n" k; *)
            match String.split k ~on:':' with
            | [v; d] -> let arr_name = Str.replace_first (Str.regexp "^\\([^[]+\\)\\[.*$") "\\1" v in
                        let arr_dim = Int.of_string d in
@@ -76,7 +84,10 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
   in
   let rcv_from_vars vars k =
     match rcv_from_hash vars k with
-    | Some f -> f
+    | Some f ->
+       if warn && not (isdefined_of_qval f) then
+         Printf.printf "The variable '%s' is not initialized\n" k;
+       f
     | None ->
        begin
          match String.split k ~on:':' with
@@ -87,7 +98,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                        begin
                          if warn then
                            Printf.printf "The variable '%s' is not initialized\n" k;
-                         make_qval "0" 0
+                         make_undef_qval ()
                        end
                      else
                        rcv_from_g_vars k
@@ -116,12 +127,15 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
     QFloatNum n
   in
   let qfloat_num_to_string f =
-    let (q, s) = match f with
+    let r = match f with
       | QFloatNum n -> n in
-    if Q.equal q Q.zero then
-      "0"
+    let d = isdefined_of_qval r in
+    let q = rational_of_qval r in
+    let s = scale_of_qval r in
+    if not d || Q.equal q Q.zero then
+      if not d then "undef" else "0"
     else
-      let precision = Int.max s (Q.to_int (fst (rcv_from_g_vars "scale"))) in
+      let precision = Int.max s (Q.to_int (rational_of_qval (rcv_from_g_vars "scale"))) in
       let ins_symbol smb pos str = Printf.sprintf "%s%c%s" (String.sub str 0 pos) smb (String.sub str pos ((String.length str) - pos)) in
       let aux_string = Z.to_string (Z.div (Z.mul (Q.num q) (Z.of_string ("1" ^ (String.make precision '0')))) (Q.den q)) in
       let res_string = if precision <> 0 then ins_symbol '.' ((String.length aux_string) - precision) aux_string else aux_string in
@@ -148,7 +162,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
             apply_fun (Str.replace_first r "\\1" str)
           else
             apply_fun str in
-      let obase = Q.to_int (fst (rcv_from_g_vars "obase")) in
+      let obase = Q.to_int (rational_of_qval (rcv_from_g_vars "obase")) in
       trim_zero ~apply_fun:(if obase = 10 then ident else fun s -> decode_z10_to_str (Z.of_string s) obase) res_string
   in
   let print_qfloat_num f =
@@ -175,11 +189,11 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                                      let val_to_int_string q =
                                                        Printf.sprintf "%s" (Z.to_string (trunc_q_to_z q))
                                                      in
-                                                     val_to_int_string (fst (qval_of_qfloat_num (interprete_expression l_vars_ref e)))) exprs in
+                                                     val_to_int_string (rational_of_qval (qval_of_qfloat_num (interprete_expression l_vars_ref e)))) exprs in
                          rcv_expr_name ~str_inds:str_inds named_expr
                       | _ -> rcv_expr_name named_expr
                     in
-                    (expr_name, if extract_val then rcv_from_vars !l_vars_ref expr_name else make_qval "0" 0)
+                    (expr_name, if extract_val then rcv_from_vars !l_vars_ref expr_name else make_undef_qval ())
                   in
                   match expr with
                   | Obctypes.NamedExpr v ->
@@ -189,6 +203,11 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      f
                   | Obctypes.Number num ->
                      let f = qfloat_num_of_qval num in
+                     if to_print then
+                       print_qfloat_num f;
+                     f
+                  | Obctypes.Undef ->
+                     let f = qfloat_num_of_qval (make_undef_qval ()) in
                      if to_print then
                        print_qfloat_num f;
                      f
@@ -225,7 +244,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                             if warn then
                                               Printf.printf "The array '%s%s' is not initialized\n" src_r (String.concat ~sep:"" (List.init src_d ~f:(fun _ -> "[]")));
                                             let inds_str = String.concat ~sep:"" (List.init dst_d ~f:(fun _ -> "[0]")) in
-                                            add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" dst_r inds_str dst_d, make_qval "0" 0)
+                                            add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" dst_r inds_str dst_d, make_undef_qval ())
                                    | (_, _) -> raise (IncorrectCall (Printf.sprintf "Parameter type mismatch in function %s" f))
                                  in
                                  List.iter ~f:add_to_l_vars l
@@ -240,7 +259,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                 | (Obctypes.Arr (s, dim), n) -> let inds_str = String.concat ~sep:"" (List.init dim ~f:(fun _ -> "[0]")) in
                                                                 add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" s inds_str dim, n)
                               in
-                              List.iter ~f:(fun s -> add_to_l_vars (s, (make_qval "0" 0))) l;
+                              List.iter ~f:(fun s -> add_to_l_vars (s, (make_undef_qval ()))) l;
                          end;
                          begin
                            try
@@ -267,7 +286,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.Or -> fun x y -> Q.of_int (if not (Q.equal x z) || not (Q.equal y z) then 1 else 0)
                          | Obctypes.And -> fun x y -> Q.of_int (if not (Q.equal x z) && not (Q.equal y z) then 1 else 0)
                        in
-                       let f = qfloat_num_of_qval (lambda_op (fst n1) (fst n2), 0) in
+                       let f = qfloat_num_of_qval (make_qval (Q.to_string (lambda_op (rational_of_qval n1) (rational_of_qval n2))) 0) in
                        if to_print then
                          print_qfloat_num f;
                        f
@@ -276,7 +295,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      begin
                        let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
                        let z = Q.zero in
-                       let f = qfloat_num_of_qval (make_qval (if Q.equal (fst n) z then "1" else "0") 0) in
+                       let f = qfloat_num_of_qval (make_qval (if Q.equal (rational_of_qval n) z then "1" else "0") 0) in
                        if to_print then
                          print_qfloat_num f;
                        f
@@ -300,7 +319,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                        let den = Z.of_string "1" in
                                        Q.make num den
                        in
-                       let f = qfloat_num_of_qval (lambda_op (fst n1) (fst n2), Int.max (snd n1) (snd n2)) in
+                       let f = qfloat_num_of_qval (make_qval (Q.to_string (lambda_op (rational_of_qval n1) (rational_of_qval n2))) (Int.max (scale_of_qval n1) (scale_of_qval n2))) in
                        if to_print then
                          print_qfloat_num f;
                        f
@@ -318,7 +337,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.Lt -> Q.lt
                          | Obctypes.Gt -> Q.gt
                        in
-                       let f = qfloat_num_of_qval (make_qval (if lambda_op (fst n1) (fst n2) then "1" else "0") 0) in
+                       let f = qfloat_num_of_qval (make_qval (if lambda_op (rational_of_qval n1) (rational_of_qval n2) then "1" else "0") 0) in
                        if to_print then
                          print_qfloat_num f;
                        f
@@ -326,7 +345,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                   | Obctypes.InvertSign e ->
                      begin
                        let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                       let f = qfloat_num_of_qval (Q.sub Q.zero (fst n), (snd n)) in
+                       let f = qfloat_num_of_qval (make_qval (Q.to_string (Q.sub Q.zero (rational_of_qval n))) (scale_of_qval n)) in
                        if to_print then
                          print_qfloat_num f;
                        f
@@ -339,7 +358,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.Incr -> fun x -> Q.add x (Q.of_string "1")
                          | Obctypes.Decr -> fun x -> Q.sub x (Q.of_string "1")
                        in
-                       add_to_vars_by_ref l_vars_ref (var_name, (lambda_op (fst var_val), snd var_val));
+                       add_to_vars_by_ref l_vars_ref (var_name, make_qval (Q.to_string (lambda_op (rational_of_qval var_val))) (scale_of_qval var_val));
                        let f = qfloat_num_of_qval (rcv_from_vars !l_vars_ref var_name) in
                        if to_print then
                          print_qfloat_num f;
@@ -353,7 +372,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.Incr -> fun x -> Q.add x (Q.of_string "1")
                          | Obctypes.Decr -> fun x -> Q.sub x (Q.of_string "1")
                        in
-                       add_to_vars_by_ref l_vars_ref (var_name, (lambda_op (fst var_val), snd var_val));
+                       add_to_vars_by_ref l_vars_ref (var_name, make_qval (Q.to_string (lambda_op (rational_of_qval var_val))) (scale_of_qval var_val));
                        let f = qfloat_num_of_qval var_val in
                        if to_print then
                          print_qfloat_num f;
@@ -380,12 +399,18 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                        let den = Z.of_string "1" in
                                        Q.make num den
                        in
-                       add_to_vars_by_ref l_vars_ref (var_name, (lambda_op (fst var_val) (fst expr_val), Int.max (snd var_val) (snd expr_val)));
+                       let isdef = not warn || (match o with
+                         | Obctypes.OpAssign -> isdefined_of_qval expr_val
+                         | _ -> (isdefined_of_qval var_val) && (isdefined_of_qval expr_val))
+                       in
+                       add_to_vars_by_ref l_vars_ref (var_name, make_qval ~def:isdef
+                                                                          (Q.to_string (lambda_op (rational_of_qval var_val) (rational_of_qval expr_val)))
+                                                                          (Int.max (scale_of_qval var_val) (scale_of_qval expr_val)));
                        qfloat_num_of_qval (rcv_from_vars !l_vars_ref var_name)
                      end
                   | Obctypes.Ternary (e1, e2, e3) ->
                      let expr1_val = qval_of_qfloat_num (interprete_expression l_vars_ref e1) in
-                     let f  = interprete_expression l_vars_ref (if not (Q.equal (fst expr1_val) Q.zero) then e2 else e3) in
+                     let f  = interprete_expression l_vars_ref (if not (Q.equal (rational_of_qval expr1_val) Q.zero) then e2 else e3) in
                      if to_print then
                        print_qfloat_num f;
                      f
@@ -398,24 +423,24 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      f
                   | Obctypes.Sqrt e ->
                      let expr_val = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                     let precision = Int.max (Q.to_int (fst (rcv_from_g_vars "scale"))) (snd expr_val) in
-                     let aux_mul = Q.mul (fst expr_val) (Q.of_string ("1" ^ (String.make (2 * precision) '0'))) in
+                     let precision = Int.max (Q.to_int (rational_of_qval (rcv_from_g_vars "scale"))) (scale_of_qval expr_val) in
+                     let aux_mul = Q.mul (rational_of_qval expr_val) (Q.of_string ("1" ^ (String.make (2 * precision) '0'))) in
                      let aux_sqrt = Z.sqrt (trunc_q_to_z aux_mul) in
-                     let s = (Q.make aux_sqrt (Z.of_string ("1" ^ (String.make precision '0'))), precision) in
+                     let s = make_qval (Q.to_string (Q.make aux_sqrt (Z.of_string ("1" ^ (String.make precision '0'))))) precision in
                      let f = qfloat_num_of_qval s in
                      if to_print then
                        print_qfloat_num f;
                      f
                   | Obctypes.ScaleWithArg e ->
                      let expr_val = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                     let s = make_qval (Int.to_string (snd expr_val)) 0 in
+                     let s = make_qval (Int.to_string (scale_of_qval expr_val)) 0 in
                      let f = qfloat_num_of_qval s in
                      if to_print then
                        print_qfloat_num f;
                      f
                   | Obctypes.Truncate e ->
                      let expr_val = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                     let t = (Q.make (trunc_q_to_z (fst expr_val)) (Z.of_string "1"), 0) in
+                     let t = make_qval (Q.to_string (Q.make (trunc_q_to_z (rational_of_qval expr_val)) (Z.of_string "1"))) 0 in
                      let f = qfloat_num_of_qval t in
                      if to_print then
                        print_qfloat_num f;
@@ -432,7 +457,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      | Obctypes.Empty -> qfloat_num_of_qval (make_qval "0" 0)
                      | Obctypes.RetExpr e -> interprete_expression l_vars_ref e
                    in
-                   raise (ExitProgram (Z.to_int (trunc_q_to_z (fst (qval_of_qfloat_num n)))))
+                   raise (ExitProgram (Z.to_int (trunc_q_to_z (rational_of_qval (qval_of_qfloat_num n)))))
                 | Obctypes.Return r ->
                    let n = match r with
                      | Obctypes.Empty -> qfloat_num_of_qval (make_qval "0" 0)
@@ -444,7 +469,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      let interprete_for expr1 expr2 expr3 st =
                        let _ = interprete_expression l_vars_ref expr1 in
                        let n = qval_of_qfloat_num (interprete_expression l_vars_ref expr2) in
-                       if not (Q.equal (fst n) Q.zero) then
+                       if not (Q.equal (rational_of_qval n) Q.zero) then
                          try
                            while true do
                              begin
@@ -455,7 +480,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                              end;
                              let _ = interprete_expression l_vars_ref expr3 in
                              let n = qval_of_qfloat_num (interprete_expression l_vars_ref expr2) in
-                             if Q.equal (fst n) Q.zero then
+                             if Q.equal (rational_of_qval n) Q.zero then
                                raise BreakLoop
                            done
                          with
@@ -465,15 +490,15 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                    end
                 | Obctypes.If (e, s) ->
                    let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                   if not (Q.equal (fst n) Q.zero) then interprete_statement ~l_vars_ref:l_vars_ref s
+                   if not (Q.equal (rational_of_qval n) Q.zero) then interprete_statement ~l_vars_ref:l_vars_ref s
                 | Obctypes.IfElse (e, s1, s2) ->
                    let n = qval_of_qfloat_num (interprete_expression l_vars_ref e) in
-                   interprete_statement ~l_vars_ref:l_vars_ref (if not (Q.equal (fst n) Q.zero) then s1 else s2)
+                   interprete_statement ~l_vars_ref:l_vars_ref (if not (Q.equal (rational_of_qval n) Q.zero) then s1 else s2)
                 | Obctypes.While (e, s) ->
                    begin
                      let interprete_while expr st =
                        let n = qval_of_qfloat_num (interprete_expression l_vars_ref expr) in
-                       if not (Q.equal (fst n) Q.zero) then
+                       if not (Q.equal (rational_of_qval n) Q.zero) then
                          try
                            while true do
                              begin
@@ -483,7 +508,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                | ContinueLoop -> ()
                              end;
                              let n = qval_of_qfloat_num (interprete_expression l_vars_ref expr) in
-                             if Q.equal (fst n) Q.zero then
+                             if Q.equal (rational_of_qval n) Q.zero then
                                raise BreakLoop
                            done
                          with
@@ -579,7 +604,8 @@ let main () =
       | ExitProgram n -> exit n
     end;
   if in_file_list_len = 0 || !force_interactive_mode then
-    let keywords = ["for"; "if"; "else"; "while"; "break"; "continue"; "quit"; "exit"] in
+    let keywords = ["define"; "break"; "continue"; "quit"; "exit"; "length"; "return"; "for"; "if"; "else";
+                    "while"; "sqrt"; "undef"; "scale"; "truncate"; "ibase"; "obase"; "auto"] in
     let tab_completion ~left ~right:_ =
       let last_elem = List.last_exn (String.split left ~on:' ') in
       List.filter keywords ~f:(String.is_prefix ~prefix:last_elem) in
