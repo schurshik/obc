@@ -1,0 +1,10 @@
+define loop_factorial(n)
+{
+    auto c, i
+    c = 1
+    for (i = 1; i <= n; ++i)
+        c *= i
+    return c
+}
+
+loop_factorial(100)

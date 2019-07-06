@@ -1,0 +1,6 @@
+define recursive_factorial(n)
+{
+    return n == 0 ? 1 : n * recursive_factorial(n - 1)
+}
+
+recursive_factorial(100)

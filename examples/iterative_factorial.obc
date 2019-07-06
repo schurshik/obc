@@ -1,0 +1,13 @@
+define auxiliary_factorial(k, p, n)
+{
+    if (k == n)
+        return p
+    return auxiliary_factorial(k + 1, p * (k + 1), n)
+}
+
+define iterative_factorial(n)
+{
+    return auxiliary_factorial(0, 1, n)
+}
+
+iterative_factorial(100)
