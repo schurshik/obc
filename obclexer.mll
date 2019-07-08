@@ -73,6 +73,7 @@ let newline = '\n'
 let comment = '#' [^ '\n']*
 let scale_token = "scale"
 let truncate_token = "truncate"
+let print_token = "print"
 let ibase_token = "ibase"
 let obase_token = "obase"
 (* let newline = '\n' | "\r\n" *)
@@ -117,12 +118,13 @@ rule read_tokens = parse
 | "else" { ELSE }
 | "while" { WHILE }
 | "sqrt" { SQRT }
-| "undef" { UNDEF }
 | scale_token { SCALE }
 | truncate_token { TRUNCATE }
+| print_token { PRINT }
 | ibase_token { IBASE }
 | obase_token { OBASE }
 | "auto" { AUTO }
+| "undef" { UNDEF }
 | word { LETTER (Lexing.lexeme lexbuf) }
 | number { NUMBER (qval_of_string (Lexing.lexeme lexbuf)) }
 | '(' { LEFT_CIRCLE_BRACE }

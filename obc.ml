@@ -56,7 +56,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
        end
   in
   let create_arr_regexp arr_name arr_dim =
-    Str.regexp (Printf.sprintf "^%s%s:[0-9]+$" arr_name (String.concat ~sep:"" (List.init arr_dim ~f:(fun _ -> "\\[\\([0-9]+\\)\\]")))) in
+    Str.regexp (Printf.sprintf "^%s%s$" arr_name (String.concat ~sep:"" (List.init arr_dim ~f:(fun _ -> "\\[\\(-?[0-9]+\\)\\]")))) in
   let add_to_vars_by_ref vars_ref p =
     if not (phys_equal vars_ref g_vars_ref) then
       let (k, _) = p in
@@ -114,7 +114,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
     match named_expr with
     | Obctypes.Value l -> l
     | Obctypes.ValueAtIndex (l, _) -> let inds_str = List.map ~f:(fun s -> Printf.sprintf "[%s]" s) str_inds |> String.concat ~sep:"" in
-                                      Printf.sprintf "%s%s:%d" l inds_str (List.length str_inds)
+                                      Printf.sprintf "%s%s" l inds_str
     | Obctypes.Scale -> "scale" (* Obclexer.scale_token *)
     | Obctypes.Ibase -> "ibase" (* Obclexer.ibase_token *)
     | Obctypes.Obase -> "obase" (* Obclexer.obase_token *)
@@ -133,7 +133,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
     let q = rational_of_qval r in
     let s = scale_of_qval r in
     if not d || Q.equal q Q.zero then
-      if not d then "undef" else "0"
+      if (not d) && warn then "undef" else "0"
     else
       let precision = Int.max s (Q.to_int (rational_of_qval (rcv_from_g_vars "scale"))) in
       let ins_symbol smb pos str = Printf.sprintf "%s%c%s" (String.sub str 0 pos) smb (String.sub str pos ((String.length str) - pos)) in
@@ -239,12 +239,14 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                                              let inds = List.map ~f:(fun y -> Int.of_string (Str.replace_first reg_exp ("\\" ^ y) k))
                                                                                  (List.init src_d ~f:(fun x -> Int.to_string (x + 1))) in
                                                              let inds_str = String.concat ~sep:"" (List.map ~f:(fun x -> Printf.sprintf "[%d]" x) inds) in
-                                                             add_to_hash (ref l_vars) ((Printf.sprintf "%s%s:%d" dst_r inds_str dst_d), d)) !l_vars_ref
+                                                             add_to_hash (ref l_vars) ((Printf.sprintf "%s%s" dst_r inds_str), d)) !l_vars_ref
                                         else
+                                          begin
                                             if warn then
                                               Printf.printf "The array '%s%s' is not initialized\n" src_r (String.concat ~sep:"" (List.init src_d ~f:(fun _ -> "[]")));
                                             let inds_str = String.concat ~sep:"" (List.init dst_d ~f:(fun _ -> "[0]")) in
-                                            add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" dst_r inds_str dst_d, make_undef_qval ())
+                                            add_to_hash (ref l_vars) (Printf.sprintf "%s%s" dst_r inds_str, make_undef_qval ())
+                                          end
                                    | (_, _) -> raise (IncorrectCall (Printf.sprintf "Parameter type mismatch in function %s" f))
                                  in
                                  List.iter ~f:add_to_l_vars l
@@ -257,7 +259,7 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                                 match p with
                                 | (Obctypes.Var s, n) -> add_to_hash (ref l_vars) (s, n)
                                 | (Obctypes.Arr (s, dim), n) -> let inds_str = String.concat ~sep:"" (List.init dim ~f:(fun _ -> "[0]")) in
-                                                                add_to_hash (ref l_vars) (Printf.sprintf "%s%s:%d" s inds_str dim, n)
+                                                                add_to_hash (ref l_vars) (Printf.sprintf "%s%s" s inds_str, n)
                               in
                               List.iter ~f:(fun s -> add_to_l_vars (s, (make_undef_qval ()))) l;
                          end;
@@ -358,11 +360,14 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.Incr -> fun x -> Q.add x (Q.of_string "1")
                          | Obctypes.Decr -> fun x -> Q.sub x (Q.of_string "1")
                        in
-                       add_to_vars_by_ref l_vars_ref (var_name, make_qval (Q.to_string (lambda_op (rational_of_qval var_val))) (scale_of_qval var_val));
-                       let f = qfloat_num_of_qval (rcv_from_vars !l_vars_ref var_name) in
-                       if to_print then
-                         print_qfloat_num f;
-                       f
+                       let q = make_qval (Q.to_string (lambda_op (rational_of_qval var_val))) (scale_of_qval var_val) in
+                       begin
+                         add_to_vars_by_ref l_vars_ref (var_name, q);
+                         let f = qfloat_num_of_qval q in
+                         if to_print then
+                           print_qfloat_num f;
+                         f
+                       end
                      end
                   | Obctypes.PostAssign (o, v) ->
                      begin
@@ -403,10 +408,12 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                          | Obctypes.OpAssign -> isdefined_of_qval expr_val
                          | _ -> (isdefined_of_qval var_val) && (isdefined_of_qval expr_val))
                        in
-                       add_to_vars_by_ref l_vars_ref (var_name, make_qval ~def:isdef
-                                                                          (Q.to_string (lambda_op (rational_of_qval var_val) (rational_of_qval expr_val)))
-                                                                          (Int.max (scale_of_qval var_val) (scale_of_qval expr_val)));
-                       qfloat_num_of_qval (rcv_from_vars !l_vars_ref var_name)
+                       let q = make_qval ~def:isdef (Q.to_string (lambda_op (rational_of_qval var_val) (rational_of_qval expr_val)))
+                                         (Int.max (scale_of_qval var_val) (scale_of_qval expr_val)) in
+                       begin
+                         add_to_vars_by_ref l_vars_ref (var_name, q);
+                         qfloat_num_of_qval q
+                       end
                      end
                   | Obctypes.Ternary (e1, e2, e3) ->
                      let expr1_val = qval_of_qfloat_num (interprete_expression l_vars_ref e1) in
@@ -445,6 +452,28 @@ let interprete_program ?(warn=false) prog g_vars_ref g_funs_ref =
                      if to_print then
                        print_qfloat_num f;
                      f
+                  | Obctypes.Print a ->
+                     match a with
+                     | Obctypes.OptArguments arg_values ->
+                        let f b =
+                          match b with
+                          | Obctypes.ArgExpr e -> qfloat_num_to_string (interprete_expression l_vars_ref e)
+                          | Obctypes.ArgArr (r, d) ->
+                             let reg_exp = create_arr_regexp r d in
+                             if List.exists ~f:(fun k -> Str.string_match reg_exp k 0) (Hashtbl.keys !l_vars_ref) then
+                               let l = Hashtbl.fold ~f:(fun ~key:k ~data:d acc -> (if Str.string_match reg_exp k 0 then Some (k, d) else None) :: acc) !l_vars_ref ~init:[] in
+                               let t = List.filter ~f:(fun e -> match e with | Some _ -> true | None -> false) l in
+                               let s = String.concat ~sep:", " (List.map ~f:(fun e -> match e with | Some (k, d) -> Printf.sprintf "(%s,%s)" k (qfloat_num_to_string (qfloat_num_of_qval d)) | None -> "") t) in
+                               s
+                             else
+                               begin
+                                 if warn then
+                                   Printf.printf "The array '%s%s' is not initialized\n" r (String.concat ~sep:"" (List.init d ~f:(fun _ -> "[]")));
+                                 ""
+                               end
+                        in
+                        Printf.printf "%s\n" (String.concat ~sep:", " (List.map ~f:f arg_values));
+                        qfloat_num_of_qval (make_qval "0" 0)
                 in
                 match st with
                 | Obctypes.Expr e -> let _ = interprete_expression l_vars_ref ~to_print:true e in ()

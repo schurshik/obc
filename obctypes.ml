@@ -65,6 +65,7 @@ expression =
   | Sqrt of expression
   | ScaleWithArg of expression
   | Truncate of expression
+  | Print of opt_argument_list
 and
 argument_value =
   | ArgExpr of expression

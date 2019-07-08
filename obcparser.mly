@@ -46,17 +46,19 @@ open Obctypes
 
 %token SQRT
 
-%token UNDEF
-
 %token SCALE
 
 %token TRUNCATE
+
+%token PRINT
 
 %token IBASE
 
 %token OBASE
 
 %token AUTO
+
+%token UNDEF
 
 %token LEFT_CIRCLE_BRACE RIGHT_CIRCLE_BRACE
 
@@ -189,6 +191,7 @@ expression:
 | SQRT LEFT_CIRCLE_BRACE e = expression RIGHT_CIRCLE_BRACE { Sqrt e }
 | SCALE LEFT_CIRCLE_BRACE e = expression RIGHT_CIRCLE_BRACE { ScaleWithArg e }
 | TRUNCATE LEFT_CIRCLE_BRACE e = expression RIGHT_CIRCLE_BRACE { Truncate e }
+| PRINT LEFT_CIRCLE_BRACE a = opt_argument_list RIGHT_CIRCLE_BRACE { Print a }
 
 named_expression:
 | l = LETTER { Value l }
